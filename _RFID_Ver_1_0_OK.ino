@@ -2,7 +2,7 @@
 /////////////////////////////////////////
 // Arduino 1.0.6 ATMega 328            //
 // Versioan 1.0.BETA 23.12.2014        //
-// Made GitHub RFID                    //
+// Made GitHub RFID Ver 1.0            //
 /////////////////////////////////////////
 
 #include <LiquidCrystalRus.h>
