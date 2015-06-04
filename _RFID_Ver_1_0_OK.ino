@@ -1,9 +1,8 @@
 
-////////////////////////////////////////////////////////////
-// Arduino 1.0.6 ATMega 328            //
-// Versioan 1.0.BETA 23.12.2014      //
-// Made GitHub RFID Ver 1.0  OK      //
-////////////////////////////////////////////////////////////
+// Arduino 1.0.6 ATMega 328             
+// Versioan 1.0.BETA 23.12.2014       
+// Made GitHub RFID Ver 1.0  OK       
+// Update by Romik 2.06.2015
 
 #include <LiquidCrystalRus.h>
 #include <SPI.h>
@@ -11,18 +10,19 @@
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include <TinyGPS++.h>
-#include "RTClib.h"
+#include <RTClib.h>
 
-#define SS_PIN 10
-#define RST_PIN 5
-#define DS1307_ADDRESS 0x68
-#define ADDR_EEPROM    0x50
+#define SS_PIN   10
+#define RST_PIN  5
+#define DS1307_ADDRESS   0x68
+#define ADDR_EEPROM        0x50
 
-TinyGPSPlus gps;                            // Attach GPS Library
-SoftwareSerial bt(7,6);                 // (7)RX,(6)TX => BlueToth HC-05
-SoftwareSerial ss(3,255);               // 4 - Не подключен
-LiquidCrystalRus lcd(8,2,A0,A1,A2,A3);  // Display
-MFRC522 mfrc522(SS_PIN, RST_PIN);	// Create MFRC522 instance.
+TinyGPSPlus gps;                                    // Attach GPS Library
+SoftwareSerial bt(7,6);                             // (7)RX,(6)TX => BlueToth HC-05
+SoftwareSerial ss(3,255);                         // 4 - Не подключен = GPS EM-406A
+LiquidCrystalRus lcd(8,2,A0,A1,A2,A3);   // Display
+MFRC522 mfrc522(SS_PIN, RST_PIN);	 // Create MFRC522 instance.
+RTC_DS1307 rtc;                                     // DS1307 Real Time Clock
 
 byte mode = 2;
 int ADCvalue;  
@@ -41,30 +41,52 @@ void setup() {
   SPI.begin();
   Wire.begin();
 
-  mfrc522.PCD_Init();	// Init MFRC522 card
+  mfrc522.PCD_Init();    // Init MFRC522 card
 
   lcd.begin(16, 2);
   lcd.setCursor(0,0);
   lcd.print("RFID Ver 1.0");
   lcd.setCursor(0,1);
-  lcd.print("Romik 11.09.2014");
-  delay(1000);
+  lcd.print("Romik 04.06.2015");
+  delay(2000);
 
-  bt.begin(9600);
-  ss.begin(4800);
+  bt.begin(9600);  // Bletooth
+  ss.begin(4800); // GPS
+  
   ss.listen();
 
   lcd.clear();
-  i2c_scanner();
-  delay(1000);
+  i2c_scanner(); // Check I2C Devices
+  delay(2000);
+  
   lcd.clear();
-
-  lcd.print("Поиск спутников."); // По умолчанию. 
+  
+  
+  
+   if (! rtc.isrunning()) {
+    lcd.println(F("RTC Error."));
+   } else {
+       
+     // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+       
+     DateTime now = rtc.now();
+     print_time();
+   }    
+   
+  delay(3000);
 
 }
 
 void loop() {
-
+    
+   unsigned long currentMillis = millis();
+      
+    if( currentMillis - previousMillis > 1000) {
+      previousMillis = currentMillis;      
+      print_time();
+    }
+    
+    
   ADCvalue = analogRead(7);
 
   if (ADCvalue > 719 && ADCvalue < 723) {
@@ -81,8 +103,8 @@ void loop() {
     if (dis != 0) dis--;
   }
 
-  if (dis == 2) { lcd.clear(); lcd.print("Поиск спутников"); }
-  if (dis == 3) { lcd.clear(); lcd.print("Ожидание карты"); }
+  //if (dis == 2) { lcd.clear(); lcd.print("Поиск спутников"); }
+  //if (dis == 3) { lcd.clear(); lcd.print("Ожидание карты"); }
      
   switch (mode) {
   case 2:
@@ -109,6 +131,9 @@ void loop() {
         ii = 0; 
       }
     }
+    
+    /*
+    
     if (gps_stat) { 
       lcd.setCursor(0,1); 
       lcd.print("GPS OK  "); 
@@ -117,16 +142,13 @@ void loop() {
       lcd.setCursor(0,1); 
       lcd.print("GPS None"); 
     } 
-  }
+    */
+  } // --------------------- End of Loop ----------------------------------------------------
 
   // ============ Часы ========================================
 
   if (mode == 1) {
-    unsigned long currentMillis = millis();
-    if(currentMillis - previousMillis > interval_time) {
-      previousMillis = currentMillis;      
-      getDateTime();
-    }
+   
   }
 
   // ================= Ожидание карты ======================
@@ -144,6 +166,8 @@ void loop() {
     }
   }
 }
+
+// -------------------------------------- Функуии ------------------------------------------
 
 void i2c_scanner() {
 
@@ -172,53 +196,33 @@ void i2c_scanner() {
   }
 }
 
-void getDateTime() {
+void print_time() {
 
-  Wire.beginTransmission(DS1307_ADDRESS);
-  Wire.write(0);
-  Wire.endTransmission();
-  Wire.requestFrom(DS1307_ADDRESS, 7);
-
-  byte second = bcdToDec(Wire.read());
-  byte minute = bcdToDec(Wire.read());
-  byte hour = bcdToDec(Wire.read() & 0b111111); //24 hour time
-  byte weekDay = bcdToDec(Wire.read()); //0-6 -> sunday - Saturday
-  byte monthDay = bcdToDec(Wire.read());
-  byte month = bcdToDec(Wire.read());
-  byte year = bcdToDec(Wire.read());
-
-  lcd.setCursor(0,1); 
-  lcd.print("Ч:М:С ");
-
-  if (hour < 10) lcd.print("0");
-  lcd.print(hour);
-
-  lcd.print(":");
-
-  if (minute < 10) lcd.print("0");
-  lcd.print(minute);
-
-  lcd.print(":");
-
-  if (second < 10) lcd.print("0");
-  lcd.print(second);
-
-  lcd.setCursor(0,0);
-  lcd.print("Д-М-Г ");
-
-  if (monthDay < 10) lcd.print("0"); 
-  lcd.print(monthDay);
-
-  lcd.print("-");
-
-  if (month < 10) lcd.print("0"); 
-  lcd.print(month);
-
-  lcd.print("-");
-
-  if (year < 10) lcd.print("0"); 
-  lcd.print(year);
-
+     DateTime now = rtc.now();
+      
+     char zero = '0';
+     
+     lcd.clear();
+      
+     lcd.setCursor(0,0);       
+     
+     if (now.day() < 10) lcd.print(zero);
+     lcd.print(now.day(), DEC);
+     lcd.print('/');
+     if (now.month() < 10) lcd.print(zero);
+     lcd.print(now.month(), DEC);
+     lcd.print('/');
+     lcd.print(now.year(), DEC);
+     
+     lcd.setCursor(0,1);            
+     if (now.hour() < 10) lcd.print(zero);
+     lcd.print(now.hour(), DEC);
+     lcd.print(':');
+     if (now.minute() < 10) lcd.print(zero);
+     lcd.print(now.minute(), DEC);
+     lcd.print(':');
+     if (now.second() < 10) lcd.print(zero);
+     lcd.print(now.second(), DEC);
 
 }
 
