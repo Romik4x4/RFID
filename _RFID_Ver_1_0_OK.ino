@@ -1,23 +1,24 @@
 
-/////////////////////////////////////////
+////////////////////////////////////////////////////////////
 // Arduino 1.0.6 ATMega 328            //
-// Versioan 1.0.BETA 23.12.2014        //
-// Made GitHub RFID Ver 1.0            //
-/////////////////////////////////////////
+// Versioan 1.0.BETA 23.12.2014      //
+// Made GitHub RFID Ver 1.0  OK      //
+////////////////////////////////////////////////////////////
 
 #include <LiquidCrystalRus.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
-#include <TinyGPS.h>
+#include <TinyGPS++.h>
+#include "RTClib.h"
 
 #define SS_PIN 10
 #define RST_PIN 5
 #define DS1307_ADDRESS 0x68
 #define ADDR_EEPROM    0x50
 
-TinyGPS gps;                            // Attach GPS Library
+TinyGPSPlus gps;                            // Attach GPS Library
 SoftwareSerial bt(7,6);                 // (7)RX,(6)TX => BlueToth HC-05
 SoftwareSerial ss(3,255);               // 4 - Не подключен
 LiquidCrystalRus lcd(8,2,A0,A1,A2,A3);  // Display
