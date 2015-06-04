@@ -12,6 +12,11 @@
 #include <TinyGPS++.h>
 #include <RTClib.h>
 
+#define TIMECTL_MAXTICS 4294967295L
+#define TIMECTL_INIT          0
+
+#define UTC 3 //  UTC+3 = Moscow
+
 #define SS_PIN   10
 #define RST_PIN  5
 #define DS1307_ADDRESS   0x68
@@ -24,17 +29,37 @@ LiquidCrystalRus lcd(8,2,A0,A1,A2,A3);   // Display
 MFRC522 mfrc522(SS_PIN, RST_PIN);	 // Create MFRC522 instance.
 RTC_DS1307 rtc;                                     // DS1307 Real Time Clock
 
-byte mode = 2;
-int ADCvalue;  
+unsigned long gpsTimeMark = 0;
+unsigned long gpsTimeInterval = 1000;
+
+unsigned long SetgpsTimeMark     = 0;
+unsigned long SetgpsTimeInterval = 1000*60*10; // 10 Минут
+
+//byte mode = 2;
+
+int ADCvalue;     
+byte knopka = 0;  // Номер нажатой кнопки
+
 long previousMillis = 0;
-long interval_time = 800; 
-char NMEA;
-char buff[83]; 
-int ii = 0;
-int jj = 0;
-boolean gps_stat = false;
-int dis = 2;
-boolean mode_status = true;
+
+struct nfc_t    
+{
+  double lat,lng;                // GPS Coordinates     
+  byte nfcid[10];                // NFC ID
+  unsigned long datetime; // UnixTimeStamp
+
+} 
+nfc_id;
+
+// char NMEA;
+// char buff[83]; 
+
+
+//int ii = 0;
+//int jj = 0;
+//boolean gps_stat = false;
+//int dis = 2;
+//boolean mode_status = true;
 
 void setup() {
 
@@ -52,121 +77,178 @@ void setup() {
 
   bt.begin(9600);  // Bletooth
   ss.begin(4800); // GPS
-  
+
   ss.listen();
 
   lcd.clear();
   i2c_scanner(); // Check I2C Devices
   delay(2000);
-  
+
   lcd.clear();
-  
-  
-  
-   if (! rtc.isrunning()) {
+
+
+
+  if (! rtc.isrunning()) {
     lcd.println(F("RTC Error."));
-   } else {
-       
-     // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-       
-     DateTime now = rtc.now();
-     print_time();
-   }    
-   
-  delay(3000);
+  } 
+  else {
+
+    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
+    DateTime now = rtc.now();
+    print_time(0);
+  }    
+
+  delay(1000);
 
 }
 
 void loop() {
-    
-   unsigned long currentMillis = millis();
-      
-    if( currentMillis - previousMillis > 1000) {
-      previousMillis = currentMillis;      
-      print_time();
+
+  unsigned long currentMillis = millis();
+
+
+  if (isTime(&SetgpsTimeMark,SetgpsTimeInterval)) 
+    set_GPS_DateTime();
+
+  if (knopka == 2 || knopka == 22) {
+    get_nfc();
+  }
+
+  if (knopka == 3) {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print(F("Wait GPS ..."));
+    knopka = 33;
+  }
+
+  if (knopka == 33) {
+    while (ss.available() > 0) gps.encode(ss.read());
+    if (isTime(&gpsTimeMark,gpsTimeInterval)) {
+      if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
+        lcd.clear();
+        lcd.setCursor(0,1); 
+        lcd.print(gps.location.lat(), 6); // Lat
+        lcd.print(F(" "));
+        lcd.print(gps.location.lng(), 6); // Lng
+        lcd.setCursor(0,0);                   
+        lcd.print(gps.time.hour()); 
+        lcd.print(":");
+        lcd.print(gps.time.minute()); 
+        lcd.print(":"); 
+        lcd.print(gps.time.second()); 
+        lcd.print(" ");
+        lcd.println(gps.date.year()); 
+        lcd.print("/");
+        lcd.println(gps.date.month()); 
+        lcd.print("/");
+        lcd.println(gps.date.day()); 
+      }  
+      else {               
+        lcd.setCursor(0,1);
+        for(byte x=0;x<16;x++) lcd.print(F(" "));
+        lcd.setCursor(0,1); 
+        lcd.print(gps.charsProcessed());
+      }
     }
-    
-    
+  }
+
+  if( currentMillis - previousMillis > 1000) {
+    previousMillis = currentMillis;      
+    if  (knopka == 0 || knopka == 1) {
+      print_time( knopka );
+    }
+  }
+
+  // ----------- Чтение значение кнопок .--------------------------------
+
   ADCvalue = analogRead(7);
 
   if (ADCvalue > 719 && ADCvalue < 723) {
-    dis++; 
-    if (dis > 10) dis=0;
+    knopka = 1;
   }
 
   if (ADCvalue > 656 && ADCvalue < 660) {
-    mode = dis;
-    mode_status = true;
+    knopka = 2;
   }
 
   if (ADCvalue > 628 && ADCvalue < 632) {
-    if (dis != 0) dis--;
+    knopka =3;
   }
 
   //if (dis == 2) { lcd.clear(); lcd.print("Поиск спутников"); }
   //if (dis == 3) { lcd.clear(); lcd.print("Ожидание карты"); }
-     
-  switch (mode) {
-  case 2:
-    if (mode_status) mode_status = false;
-    break;
-  case 3:
-    if (mode_status) mode_status = false;
-    break;
-  }
+
+  /*  switch (mode) {
+   case 2:
+   if (mode_status) mode_status = false;
+   break;
+   case 3:
+   if (mode_status) mode_status = false;
+   break;
+   }
+   */
 
   // =========================== GPS ==========================
 
-  if (mode == 2) {   
-    while (ss.available() > 0) {
-      if (ii==82) ii = 0;
-      buff[ii++] = char(ss.read());
-      if (buff[(ii-1)] == '\n') { 
-        buff[(ii+1)] = '\0'; 
-        if (strstr(buff,"RMC")) {
-          for (jj=0;jj<ii;jj++) bt.print(buff[jj]); 
-        }
-        if (strstr(buff,"A")) gps_stat = true; 
-        else gps_stat = false;
-        ii = 0; 
-      }
-    }
-    
-    /*
-    
-    if (gps_stat) { 
-      lcd.setCursor(0,1); 
-      lcd.print("GPS OK  "); 
-    } 
-    else { 
-      lcd.setCursor(0,1); 
-      lcd.print("GPS None"); 
-    } 
-    */
-  } // --------------------- End of Loop ----------------------------------------------------
-
-  // ============ Часы ========================================
-
-  if (mode == 1) {
+  /* if (mode == 22) {   
+   while (ss.available() > 0) {
+   if (ii==82) ii = 0;
+   buff[ii++] = char(ss.read());
+   if (buff[(ii-1)] == '\n') { 
+   buff[(ii+1)] = '\0'; 
+   if (strstr(buff,"RMC")) {
+   for (jj=0;jj<ii;jj++) bt.print(buff[jj]); 
+   }
+   if (strstr(buff,"A")) gps_stat = true; 
+   else gps_stat = false;
+   ii = 0; 
+   }
+   }
+   }
    
+   */
+
+}  // --------------------- End of Loop ----------------------------------------------------
+
+// -------------------------------------- MFRC Functions --------------------------------
+
+void get_nfc() {
+
+  if (knopka == 2) {
+    knopka = 22;
+    lcd.clear();
+    lcd.setCursor(0,1);
+    lcd.print(F("Ожидание карты"));
   }
 
-  // ================= Ожидание карты ======================
+  if (mfrc522.PICC_IsNewCardPresent()) {
+    if ( mfrc522.PICC_ReadCardSerial()) {
 
-  if (mode == 3) {
+      lcd.clear(); 
+      lcd.setCursor(0,0);          
 
-    if (mfrc522.PICC_IsNewCardPresent()) {
-      if ( ! mfrc522.PICC_ReadCardSerial()) {
-        lcd.clear(); 
-        lcd.setCursor(0,0);
-        for (byte i = 0; i < mfrc522.uid.size; i++)
-          lcd.print(mfrc522.uid.uidByte[i], HEX);
-        mfrc522.PICC_HaltA();        
-      } 
-    }
+      for (byte i = 0; i < mfrc522.uid.size; i++)
+        lcd.print(mfrc522.uid.uidByte[i], HEX);
+      mfrc522.PICC_HaltA();
+
+      if (mfrc522.uid.size > 0) {
+
+        for(byte i=0;i<10;i++) nfc_id.nfcid[i]=0;
+
+        lcd.setCursor(0,1);
+        lcd.print(F("Запись"));
+        for (byte x=6;x<16;x++) {
+          lcd.setCursor(x,1);
+          lcd.print(F(".")); 
+          delay(100);
+        } 
+        knopka = 2; 
+      }
+    } 
   }
+
 }
-
 // -------------------------------------- Функуии ------------------------------------------
 
 void i2c_scanner() {
@@ -196,43 +278,35 @@ void i2c_scanner() {
   }
 }
 
-void print_time() {
+void print_time(byte kn ) {
 
-     DateTime now = rtc.now();
-      
-     char zero = '0';
-     
-     lcd.clear();
-      
-     lcd.setCursor(0,0);       
-     
-     if (now.day() < 10) lcd.print(zero);
-     lcd.print(now.day(), DEC);
-     lcd.print('/');
-     if (now.month() < 10) lcd.print(zero);
-     lcd.print(now.month(), DEC);
-     lcd.print('/');
-     lcd.print(now.year(), DEC);
-     
-     lcd.setCursor(0,1);            
-     if (now.hour() < 10) lcd.print(zero);
-     lcd.print(now.hour(), DEC);
-     lcd.print(':');
-     if (now.minute() < 10) lcd.print(zero);
-     lcd.print(now.minute(), DEC);
-     lcd.print(':');
-     if (now.second() < 10) lcd.print(zero);
-     lcd.print(now.second(), DEC);
+  DateTime now = rtc.now();
 
-}
+  char zero = '0';
 
+  lcd.setCursor(0,0);       
+  lcd.print(F("Date: "));
+  if (now.day() < 10) lcd.print(zero);
+  lcd.print(now.day(), DEC);
+  lcd.print('/');
+  if (now.month() < 10) lcd.print(zero);
+  lcd.print(now.month(), DEC);
+  lcd.print('/');
+  lcd.print(now.year(), DEC);
 
-byte decToBcd(byte val) {
-  return ( (val/10*16) + (val%10) );
-}
+  lcd.setCursor(0,1);  
+  lcd.print(F("Time: "));     
+  if (now.hour() < 10) lcd.print(zero);
+  lcd.print(now.hour(), DEC);
+  lcd.print(':');
+  if (now.minute() < 10) lcd.print(zero);
+  lcd.print(now.minute(), DEC);
+  lcd.print(':');
+  if (now.second() < 10) lcd.print(zero);
+  lcd.print(now.second(), DEC);
 
-byte bcdToDec(byte val) {
-  return ( (val/16*10) + (val%16) );
+  // lcd.setCursor(15,1);
+  // lcd.print(kn);
 }
 
 void displayInfo()
@@ -258,10 +332,42 @@ void displayInfo()
    */
 }
 
+int isTime(unsigned long *timeMark, unsigned long timeInterval) {
+  unsigned long timeCurrent;
+  unsigned long timeElapsed;
+  int result=false;
 
+  timeCurrent = millis();
+  if (timeCurrent < *timeMark) {
+    timeElapsed=(TIMECTL_MAXTICS-*timeMark) + timeCurrent;
+  } 
+  else {
+    timeElapsed=timeCurrent-*timeMark;
+  }
 
+  if (timeElapsed>=timeInterval) {
+    *timeMark=timeCurrent;
+    result=true;
+  }
+  return(result);
+}
 
+// ---------------------------- Установка времени через GPS ------------------------
 
+void set_GPS_DateTime() {
 
+  if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
 
+    DateTime utc = (DateTime (gps.date.year(), 
+    gps.date.month(), 
+    gps.date.day(),
+    gps.time.hour(),
+    gps.time.minute(),
+    gps.time.second()) + 60 * 60 * UTC);
+
+    rtc.adjust(DateTime(utc.unixtime()));
+
+  }
+
+}
 
