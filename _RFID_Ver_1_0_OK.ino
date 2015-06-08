@@ -11,6 +11,24 @@
 #include <Wire.h>
 #include <TinyGPS++.h>
 #include <RTClib.h>
+#include <EEPROM.h>
+#include <EEPROMAnything.h>
+#include <I2C_eeprom.h>
+
+struct config_t   // Сохранение последней записи.
+{
+  unsigned  int ee_pos;
+  byte last_knopka;
+} 
+configuration;
+
+#define EEPROM_ADDRESS        0x50  // 27LC512
+
+#define EE24LC512MAXBYTES 524288/8 // 65536 Байт [0-65535]
+
+I2C_eeprom eeprom(EEPROM_ADDRESS,EE24LC512MAXBYTES);
+
+#define DEBUG 1
 
 #define TIMECTL_MAXTICS 4294967295L
 #define TIMECTL_INIT          0
@@ -19,8 +37,9 @@
 
 #define SS_PIN   10
 #define RST_PIN  5
+
 #define DS1307_ADDRESS   0x68
-#define ADDR_EEPROM        0x50
+#define ADDR_EEPROM        0x50  // 27LC512
 
 TinyGPSPlus gps;                                    // Attach GPS Library
 SoftwareSerial bt(7,6);                             // (7)RX,(6)TX => BlueToth HC-05
@@ -34,8 +53,6 @@ unsigned long gpsTimeInterval = 1000;
 
 unsigned long SetgpsTimeMark     = 0;
 unsigned long SetgpsTimeInterval = 1000*60*10; // 10 Минут
-
-//byte mode = 2;
 
 int ADCvalue;     
 byte knopka = 0;  // Номер нажатой кнопки
@@ -51,20 +68,18 @@ struct nfc_t
 } 
 nfc_id;
 
-// char NMEA;
-// char buff[83]; 
-
-
-//int ii = 0;
-//int jj = 0;
-//boolean gps_stat = false;
-//int dis = 2;
-//boolean mode_status = true;
-
 void setup() {
 
   SPI.begin();
   Wire.begin();
+
+  //configuration.ee_pos = 0;
+  //configuration.last_knopka = 0;
+  // EEPROM_writeAnything(0, configuration);
+
+  EEPROM_readAnything(0, configuration);
+
+  knopka = configuration.last_knopka;
 
   mfrc522.PCD_Init();    // Init MFRC522 card
 
@@ -86,8 +101,6 @@ void setup() {
 
   lcd.clear();
 
-
-
   if (! rtc.isrunning()) {
     lcd.println(F("RTC Error."));
   } 
@@ -99,7 +112,7 @@ void setup() {
     print_time(0);
   }    
 
-  delay(1000);
+  delay(500);
 
 }
 
@@ -128,21 +141,16 @@ void loop() {
       if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
         lcd.clear();
         lcd.setCursor(0,1); 
-        lcd.print(gps.location.lat(), 6); // Lat
+        lcd.print(gps.location.lat(), 3); // Lat
         lcd.print(F(" "));
-        lcd.print(gps.location.lng(), 6); // Lng
-        lcd.setCursor(0,0);                   
+        lcd.print(gps.location.lng(), 3); // Lng
+        lcd.setCursor(0,0);               
+        lcd.print(F("GPS: "));    
         lcd.print(gps.time.hour()); 
         lcd.print(":");
         lcd.print(gps.time.minute()); 
         lcd.print(":"); 
         lcd.print(gps.time.second()); 
-        lcd.print(" ");
-        lcd.println(gps.date.year()); 
-        lcd.print("/");
-        lcd.println(gps.date.month()); 
-        lcd.print("/");
-        lcd.println(gps.date.day()); 
       }  
       else {               
         lcd.setCursor(0,1);
@@ -166,48 +174,21 @@ void loop() {
 
   if (ADCvalue > 719 && ADCvalue < 723) {
     knopka = 1;
+    configuration.last_knopka = 1;
+    EEPROM_writeAnything(0, configuration);
   }
 
   if (ADCvalue > 656 && ADCvalue < 660) {
     knopka = 2;
+    configuration.last_knopka = 2;
+    EEPROM_writeAnything(0, configuration);
   }
 
   if (ADCvalue > 628 && ADCvalue < 632) {
     knopka =3;
+    configuration.last_knopka = 3;
+    EEPROM_writeAnything(0, configuration);    
   }
-
-  //if (dis == 2) { lcd.clear(); lcd.print("Поиск спутников"); }
-  //if (dis == 3) { lcd.clear(); lcd.print("Ожидание карты"); }
-
-  /*  switch (mode) {
-   case 2:
-   if (mode_status) mode_status = false;
-   break;
-   case 3:
-   if (mode_status) mode_status = false;
-   break;
-   }
-   */
-
-  // =========================== GPS ==========================
-
-  /* if (mode == 22) {   
-   while (ss.available() > 0) {
-   if (ii==82) ii = 0;
-   buff[ii++] = char(ss.read());
-   if (buff[(ii-1)] == '\n') { 
-   buff[(ii+1)] = '\0'; 
-   if (strstr(buff,"RMC")) {
-   for (jj=0;jj<ii;jj++) bt.print(buff[jj]); 
-   }
-   if (strstr(buff,"A")) gps_stat = true; 
-   else gps_stat = false;
-   ii = 0; 
-   }
-   }
-   }
-   
-   */
 
 }  // --------------------- End of Loop ----------------------------------------------------
 
@@ -234,7 +215,11 @@ void get_nfc() {
 
       if (mfrc522.uid.size > 0) {
 
-        for(byte i=0;i<10;i++) nfc_id.nfcid[i]=0;
+        for(byte i = 0; i < 10;i++) nfc_id.nfcid[i]=0;
+        for (byte i = 0; i < mfrc522.uid.size; i++)
+          nfc_id.nfcid[i] = mfrc522.uid.uidByte[i];
+
+        save_nfc_id();
 
         lcd.setCursor(0,1);
         lcd.print(F("Запись"));
@@ -305,31 +290,6 @@ void print_time(byte kn ) {
   if (now.second() < 10) lcd.print(zero);
   lcd.print(now.second(), DEC);
 
-  // lcd.setCursor(15,1);
-  // lcd.print(kn);
-}
-
-void displayInfo()
-{
-  /*
-  if (gps.location.isValid())
-   {
-   lcd.clear();
-   lcd.setCursor(0,0);
-   lcd.print("N: ");
-   lcd.print(gps.location.lat(), 6);
-   lcd.setCursor(0,1);
-   lcd.print("E: ");
-   lcd.println(gps.location.lng(), 6);
-   } 
-   else {
-   lcd.clear();
-   lcd.print("Поиск спутников.");
-   lcd.setCursor(0,1);
-   lcd.print("Спутников: ");
-   lcd.print(gps.satellites.value());
-   }
-   */
 }
 
 int isTime(unsigned long *timeMark, unsigned long timeInterval) {
@@ -370,4 +330,53 @@ void set_GPS_DateTime() {
   }
 
 }
+
+// ------------------------- Save NFC_ID ---------------------------------------------------
+
+void save_nfc_id() {
+
+  DateTime now = rtc.now();
+
+  nfc_id.datetime = now.unixtime();
+
+  if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
+    nfc_id.lat = gps.location.lat();
+    nfc_id.lng = gps.location.lng();
+  } 
+  else {
+    nfc_id.lat = 0.0;
+    nfc_id.lng = 0.0;
+  }
+
+  EEPROM_readAnything(0, configuration); // Чтения конфигурации
+
+  unsigned int ee_pos = configuration.ee_pos;
+
+  const byte* p = (const byte*)(const void*)&nfc_id;
+  
+  for (unsigned int i = 0; i < sizeof(nfc_id); i++) 
+    eeprom.writeByte(ee_pos++, *p++);
+
+  if (ee_pos > (EE24LC512MAXBYTES - (sizeof(nfc_id)+1) ) ) {
+    configuration.ee_pos = 0;
+  } 
+  else {
+    configuration.ee_pos = ee_pos; // Следующая ячейка памяти в EEPROM
+  }
+
+  EEPROM_writeAnything(0, configuration);
+
+  if (DEBUG) { 
+    bt.print(configuration.ee_pos);
+    bt.print(" ");
+    bt.print(nfc_id.datetime);
+    bt.print(" ");
+    for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
+    bt.println(); 
+  }
+
+}
+
+
+
 
