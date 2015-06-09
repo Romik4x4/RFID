@@ -23,12 +23,14 @@ struct config_t   // Сохранение последней записи.
 } 
 configuration;
 
-
-#define EEPROM_ADDRESS        0x50  // 27LC512
+#define EEPROM_ADDRESS        (0x50)  // 27LC512
 
 #define EE24LC512MAXBYTES 524288/8 // 65536 Байт [0-65535]
+#define EE24LC256MAXBYTES 262144/8 // 32768 Байт [0-32767]
 
-I2C_eeprom eeprom(EEPROM_ADDRESS,EE24LC512MAXBYTES);
+// НУЖНО В БИБЛИОТЕКЕ ПОМЕНЯТЬ uint16_t --> long
+
+I2C_eeprom eeprom(EEPROM_ADDRESS,EE24LC512MAXBYTES); // Attach EEPROM
 
 #define DEBUG 1
 
@@ -71,23 +73,31 @@ struct nfc_t
 } 
 nfc_id;
 
-struct nfc_t  nfc_id_tmp; // TMP Struct
+struct nfc_t_tmp   
+{
+  double lat,lng;                // GPS Coordinates     
+  byte nfcid[10];                // NFC ID
+  unsigned long datetime; // UnixTimeStamp
+} 
+nfc_id_tmp;
 
 void setup() {
 
   SPI.begin();
   Wire.begin();
+  
+  eeprom.begin();
 
- //configuration.ee_pos = 0;
- //configuration.last_knopka = 2;
- //configuration.card_count = 1;  
- //EEPROM_writeAnything(0, configuration);
+  //configuration.ee_pos = 0;
+  //configuration.last_knopka = 2;
+  //configuration.card_count = 1;  
+  //EEPROM_writeAnything(0, configuration);
 
   EEPROM_readAnything(0, configuration);
 
   knopka = configuration.last_knopka;
   card_count = configuration.card_count;
- 
+
   mfrc522.PCD_Init();    // Init MFRC522 card
 
   lcd.begin(16, 2);
@@ -103,11 +113,14 @@ void setup() {
   ss.listen();
 
   if (DEBUG) {
-    bt.print("Knopka: "); bt.println(knopka);
-    bt.print("Card Count: "); bt.println(card_count);
+    bt.print("Knopka: "); 
+    bt.println(knopka);
+    bt.print("Card Count: "); 
+    bt.println(card_count);
+    bt.println(eeprom.determineSize());
   }
-  
-  
+
+
   lcd.clear();
   i2c_scanner(); // Check I2C Devices
   delay(2000);
@@ -123,12 +136,12 @@ void setup() {
 
     DateTime now = rtc.now();
     print_time();
-    
+
   }    
 
   delay(500);
-  
- if (knopka != 1 && knopka != 2 && knopka != 3) { // Если ошибка записи в EEPROM
+
+  if (knopka != 1 && knopka != 2 && knopka != 3) { // Если ошибка записи в EEPROM
     knopka = 1;
     configuration.last_knopka = 1;
     EEPROM_writeAnything(0, configuration); 
@@ -186,9 +199,9 @@ void loop() {
     knopka = 11;
   }
 
- if  (knopka == 11) {
-  if( currentMillis - previousMillis > 1000) {
-    previousMillis = currentMillis;      
+  if  (knopka == 11) {
+    if( currentMillis - previousMillis > 1000) {
+      previousMillis = currentMillis;      
       print_time();
     }
   }
@@ -257,7 +270,7 @@ void get_nfc() {
         for (byte x=6;x<16;x++) {
           lcd.setCursor(x,1);
           lcd.print(F(".")); 
-          delay(100);
+          delay(50);
         } 
         knopka = 2; 
       }
@@ -384,64 +397,102 @@ void save_nfc_id() {
   EEPROM_readAnything(0, configuration); // Чтения конфигурации
 
   unsigned int ee_pos = configuration.ee_pos;
-  
-  configuration.card_count; // Номер записываемой карты (последняя картв это card_count-1)
-  
-  cmp_nfc_id();
- 
 
-  const byte* p = (const byte*)(const void*)&nfc_id;
+  // configuration.card_count; // Номер записываемой карты (последняя картв это card_count-1)
 
-  for (unsigned int i = 0; i < sizeof(nfc_id); i++) 
-    eeprom.writeByte(ee_pos++, *p++);
+  if (cmp_nfc_id() == false) {  // Если это новая карточка
 
-  if (ee_pos > (EE24LC512MAXBYTES - (sizeof(nfc_id)+1) ) ) {
-    configuration.ee_pos = 0;
-    configuration.card_count = 1; // Пишем все с самого начала
+    const byte* p = (const byte*)(const void*)&nfc_id;
+
+    for (unsigned int i = 0; i < sizeof(nfc_id); i++) 
+      eeprom.writeByte(ee_pos++, *p++);
+
+    if (ee_pos > (EE24LC512MAXBYTES - (sizeof(nfc_id)+1) ) ) {
+      configuration.ee_pos = 0;
+      configuration.card_count = 1; // Пишем все с самого начала
+    } 
+    else {
+      configuration.ee_pos = ee_pos; // Следующая ячейка памяти в EEPROM
+      configuration.card_count++;      // Количества карточек увеличиваем.
+    }
+
+    EEPROM_writeAnything(0, configuration);
+
+    if (DEBUG && configuration.ee_pos != 0) { 
+      bt.print((configuration.card_count-1));
+      bt.print(" ");
+      bt.print((configuration.ee_pos-sizeof(nfc_id)));
+      bt.print(" ");
+      bt.print(nfc_id.datetime);
+      bt.print(" ");
+      DateTime eedt (nfc_id.datetime);
+      showDate(eedt);
+      bt.print(" ");
+      for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
+      bt.println(); 
+    }
   } 
   else {
-    configuration.ee_pos = ee_pos; // Следующая ячейка памяти в EEPROM
-    configuration.card_count++;      // Количества карточек увеличиваем.
-  }
 
-  EEPROM_writeAnything(0, configuration);
+    lcd.clear();
+    lcd.print("Карта существует.");
+    delay(2000);
+  } // Если это новая карточка
 
-  if (DEBUG && configuration.ee_pos != 0) { 
-    bt.print((configuration.card_count-1));
-    bt.print(" ");
-    bt.print((configuration.ee_pos-sizeof(nfc_id)));
-    bt.print(" ");
-    bt.print(nfc_id.datetime);
-    bt.print(" ");
-    DateTime eedt (nfc_id.datetime);
-    showDate(eedt);
-    bt.print(" ");
-    for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
-    bt.println(); 
-  }
 
 }
 
 boolean cmp_nfc_id() {
 
-  /* byte* pp = (byte*)(void*)&gps_tracker; 
-   for (unsigned int i = 0; i < sizeof(gps_tracker); i++)
-    *pp++ = eeprom.readByte(address++);
-*/
+  boolean ret_val = true;
+
+  EEPROM_readAnything(0, configuration); // Чтения конфигурации
+
+  unsigned int address = 0;
+
+  for(int p=0;p<configuration.card_count;p++) {
+
+    byte* pp = (byte*)(void*)&nfc_id_tmp;
+
+    for (unsigned int i = 0; i < sizeof(nfc_id_tmp); i++)
+      *pp++ = eeprom.readByte(address++);
+
+    ret_val = true;
+
+    if (DEBUG) {
+       
+      //for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
+      //bt.println("");
+      //for(byte i = 0; i < 10;i++) bt.print(nfc_id_tmp.nfcid[i],HEX);
+      //bt.println("");
+      
+    }
+
+    for(int a=0;a<10;a++) {
+      if (nfc_id_tmp.nfcid[a] != nfc_id.nfcid[a]) { 
+        ret_val = false; 
+        break; 
+      }
+    }
+    if (ret_val) return true;
+  }
+
+  return(ret_val);
+
 }
 
 void showDate(const DateTime& dt) {
-    bt.print(dt.day(), DEC);
-    bt.print('/');
-    bt.print(dt.month(), DEC);
-    bt.print('/');    
-    bt.print(dt.year(), DEC);
-    bt.print(" ");
-    bt.print(dt.hour(), DEC);
-    bt.print(':');
-    bt.print(dt.minute(), DEC);
-    bt.print(':');
-    bt.print(dt.second(), DEC);
+  bt.print(dt.day(), DEC);
+  bt.print('/');
+  bt.print(dt.month(), DEC);
+  bt.print('/');    
+  bt.print(dt.year(), DEC);
+  bt.print(" ");
+  bt.print(dt.hour(), DEC);
+  bt.print(':');
+  bt.print(dt.minute(), DEC);
+  bt.print(':');
+  bt.print(dt.second(), DEC);
 }
 
 void menu(byte in) {
@@ -452,6 +503,11 @@ void menu(byte in) {
     lcd.clear();
   } 
 }
+
+
+
+
+
 
 
 
