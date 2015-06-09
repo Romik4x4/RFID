@@ -19,8 +19,10 @@ struct config_t   // Сохранение последней записи.
 {
   unsigned  int ee_pos;
   byte last_knopka;
+  unsigned int  card_count;
 } 
 configuration;
+
 
 #define EEPROM_ADDRESS        0x50  // 27LC512
 
@@ -59,28 +61,33 @@ byte knopka = 0;  // Номер нажатой кнопки
 
 long previousMillis = 0;
 
+unsigned int card_count;
+
 struct nfc_t    
 {
   double lat,lng;                // GPS Coordinates     
   byte nfcid[10];                // NFC ID
   unsigned long datetime; // UnixTimeStamp
-
 } 
 nfc_id;
+
+struct nfc_t  nfc_id_tmp; // TMP Struct
 
 void setup() {
 
   SPI.begin();
   Wire.begin();
 
-  //configuration.ee_pos = 0;
-  //configuration.last_knopka = 0;
-  // EEPROM_writeAnything(0, configuration);
+ //configuration.ee_pos = 0;
+ //configuration.last_knopka = 2;
+ //configuration.card_count = 1;  
+ //EEPROM_writeAnything(0, configuration);
 
   EEPROM_readAnything(0, configuration);
 
   knopka = configuration.last_knopka;
-
+  card_count = configuration.card_count;
+ 
   mfrc522.PCD_Init();    // Init MFRC522 card
 
   lcd.begin(16, 2);
@@ -95,6 +102,12 @@ void setup() {
 
   ss.listen();
 
+  if (DEBUG) {
+    bt.print("Knopka: "); bt.println(knopka);
+    bt.print("Card Count: "); bt.println(card_count);
+  }
+  
+  
   lcd.clear();
   i2c_scanner(); // Check I2C Devices
   delay(2000);
@@ -109,17 +122,23 @@ void setup() {
     // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
     DateTime now = rtc.now();
-    print_time(0);
+    print_time();
+    
   }    
 
   delay(500);
+  
+ if (knopka != 1 && knopka != 2 && knopka != 3) { // Если ошибка записи в EEPROM
+    knopka = 1;
+    configuration.last_knopka = 1;
+    EEPROM_writeAnything(0, configuration); 
+  } 
 
 }
 
 void loop() {
 
   unsigned long currentMillis = millis();
-
 
   if (isTime(&SetgpsTimeMark,SetgpsTimeInterval)) 
     set_GPS_DateTime();
@@ -129,6 +148,7 @@ void loop() {
   }
 
   if (knopka == 3) {
+    ss.listen();
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print(F("Wait GPS ..."));
@@ -161,13 +181,24 @@ void loop() {
     }
   }
 
+  if (knopka == 1) {
+    bt.listen();
+    knopka = 11;
+  }
+
+ if  (knopka == 11) {
   if( currentMillis - previousMillis > 1000) {
     previousMillis = currentMillis;      
-    if  (knopka == 0 || knopka == 1) {
-      print_time( knopka );
+      print_time();
     }
   }
 
+  if (bt.available() > 0) {
+    byte incoming = bt.read();
+    bt.println("ok");
+    menu( incoming );   
+
+  }
   // ----------- Чтение значение кнопок .--------------------------------
 
   ADCvalue = analogRead(7);
@@ -263,7 +294,9 @@ void i2c_scanner() {
   }
 }
 
-void print_time(byte kn ) {
+// ---------------------------------- Выводим дату и время на дисплей ------------------------------
+
+void print_time( void ) {
 
   DateTime now = rtc.now();
 
@@ -351,25 +384,37 @@ void save_nfc_id() {
   EEPROM_readAnything(0, configuration); // Чтения конфигурации
 
   unsigned int ee_pos = configuration.ee_pos;
+  
+  configuration.card_count; // Номер записываемой карты (последняя картв это card_count-1)
+  
+  cmp_nfc_id();
+ 
 
   const byte* p = (const byte*)(const void*)&nfc_id;
-  
+
   for (unsigned int i = 0; i < sizeof(nfc_id); i++) 
     eeprom.writeByte(ee_pos++, *p++);
 
   if (ee_pos > (EE24LC512MAXBYTES - (sizeof(nfc_id)+1) ) ) {
     configuration.ee_pos = 0;
+    configuration.card_count = 1; // Пишем все с самого начала
   } 
   else {
     configuration.ee_pos = ee_pos; // Следующая ячейка памяти в EEPROM
+    configuration.card_count++;      // Количества карточек увеличиваем.
   }
 
   EEPROM_writeAnything(0, configuration);
 
-  if (DEBUG) { 
-    bt.print(configuration.ee_pos);
+  if (DEBUG && configuration.ee_pos != 0) { 
+    bt.print((configuration.card_count-1));
+    bt.print(" ");
+    bt.print((configuration.ee_pos-sizeof(nfc_id)));
     bt.print(" ");
     bt.print(nfc_id.datetime);
+    bt.print(" ");
+    DateTime eedt (nfc_id.datetime);
+    showDate(eedt);
     bt.print(" ");
     for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
     bt.println(); 
@@ -377,6 +422,36 @@ void save_nfc_id() {
 
 }
 
+boolean cmp_nfc_id() {
+
+  /* byte* pp = (byte*)(void*)&gps_tracker; 
+   for (unsigned int i = 0; i < sizeof(gps_tracker); i++)
+    *pp++ = eeprom.readByte(address++);
+*/
+}
+
+void showDate(const DateTime& dt) {
+    bt.print(dt.day(), DEC);
+    bt.print('/');
+    bt.print(dt.month(), DEC);
+    bt.print('/');    
+    bt.print(dt.year(), DEC);
+    bt.print(" ");
+    bt.print(dt.hour(), DEC);
+    bt.print(':');
+    bt.print(dt.minute(), DEC);
+    bt.print(':');
+    bt.print(dt.second(), DEC);
+}
+
+void menu(byte in) {
+
+  bt.println("1111"); 
+
+  if(in=='1') {
+    lcd.clear();
+  } 
+}
 
 
 
