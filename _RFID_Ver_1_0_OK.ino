@@ -15,6 +15,8 @@
 #include <EEPROMAnything.h>
 #include <I2C_eeprom.h>
 
+// int  found_card;
+ 
 struct config_t   // Сохранение последней записи.
 {
   unsigned  int ee_pos;
@@ -26,13 +28,14 @@ configuration;
 #define EEPROM_ADDRESS        (0x50)  // 27LC512
 
 #define EE24LC512MAXBYTES 524288/8 // 65536 Байт [0-65535]
-#define EE24LC256MAXBYTES 262144/8 // 32768 Байт [0-32767]
+
+// #define EE24LC256MAXBYTES 262144/8 // 32768 Байт [0-32767]
 
 // НУЖНО В БИБЛИОТЕКЕ ПОМЕНЯТЬ uint16_t --> long
 
 I2C_eeprom eeprom(EEPROM_ADDRESS,EE24LC512MAXBYTES); // Attach EEPROM
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define TIMECTL_MAXTICS 4294967295L
 #define TIMECTL_INIT          0
@@ -102,9 +105,9 @@ void setup() {
 
   lcd.begin(16, 2);
   lcd.setCursor(0,0);
-  lcd.print("RFID Ver 1.0");
+  lcd.print(F("RFID Ver 1.0"));
   lcd.setCursor(0,1);
-  lcd.print("Romik 04.06.2015");
+  lcd.print(F("Romik 04.06.2015"));
   delay(2000);
 
   bt.begin(9600);  // Bletooth
@@ -113,13 +116,12 @@ void setup() {
   ss.listen();
 
   if (DEBUG) {
-    bt.print("Knopka: "); 
-    bt.println(knopka);
-    bt.print("Card Count: "); 
-    bt.println(card_count);
-    bt.println(eeprom.determineSize());
+//    bt.print("Knopka: "); 
+//    bt.println(knopka);
+//    bt.print("Card Count: "); 
+//    bt.println(card_count);
+//    bt.println(eeprom.determineSize());
   }
-
 
   lcd.clear();
   i2c_scanner(); // Check I2C Devices
@@ -128,14 +130,15 @@ void setup() {
   lcd.clear();
 
   if (! rtc.isrunning()) {
-    lcd.println(F("RTC Error."));
+    // lcd.println(F("RTC Error."));
   } 
   else {
 
     // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
-    DateTime now = rtc.now();
-    print_time();
+    // DateTime now = rtc.now();
+    
+    // print_time();
 
   }    
 
@@ -208,9 +211,7 @@ void loop() {
 
   if (bt.available() > 0) {
     byte incoming = bt.read();
-    bt.println("ok");
     menu( incoming );   
-
   }
   // ----------- Чтение значение кнопок .--------------------------------
 
@@ -296,11 +297,11 @@ void i2c_scanner() {
 
     if (error == 0)
     {
-      if (address<16) lcd.print("I2C");      
-      lcd.print("Нашли");
-      lcd.print(": 0x"); 
+      if (address<16) lcd.print(F("I2C"));            
+      lcd.print(F("Нашли"));
+      lcd.print(F(": 0x")); 
       lcd.print(address,HEX);
-      lcd.print(" OK");
+      lcd.print(F(" OK"));
       lcd.setCursor(0,1);        
       nDevices++;
     }
@@ -319,20 +320,20 @@ void print_time( void ) {
   lcd.print(F("Date: "));
   if (now.day() < 10) lcd.print(zero);
   lcd.print(now.day(), DEC);
-  lcd.print('/');
+  lcd.print(F("/"));
   if (now.month() < 10) lcd.print(zero);
   lcd.print(now.month(), DEC);
-  lcd.print('/');
+  lcd.print(F("/"));
   lcd.print(now.year(), DEC);
 
   lcd.setCursor(0,1);  
   lcd.print(F("Time: "));     
   if (now.hour() < 10) lcd.print(zero);
   lcd.print(now.hour(), DEC);
-  lcd.print(':');
+  lcd.print(F(":"));
   if (now.minute() < 10) lcd.print(zero);
   lcd.print(now.minute(), DEC);
-  lcd.print(':');
+  lcd.print(F(":"));
   if (now.second() < 10) lcd.print(zero);
   lcd.print(now.second(), DEC);
 
@@ -400,6 +401,8 @@ void save_nfc_id() {
 
   // configuration.card_count; // Номер записываемой карты (последняя картв это card_count-1)
 
+  int  found_card;
+  
   if (cmp_nfc_id() == false) {  // Если это новая карточка
 
     const byte* p = (const byte*)(const void*)&nfc_id;
@@ -420,14 +423,14 @@ void save_nfc_id() {
 
     if (DEBUG && configuration.ee_pos != 0) { 
       bt.print((configuration.card_count-1));
-      bt.print(" ");
+      bt.print(F(" "));
       bt.print((configuration.ee_pos-sizeof(nfc_id)));
-      bt.print(" ");
+      bt.print(F(" "));
       bt.print(nfc_id.datetime);
-      bt.print(" ");
+      bt.print(F(" "));
       DateTime eedt (nfc_id.datetime);
       showDate(eedt);
-      bt.print(" ");
+      bt.print(F(" "));
       for(byte i = 0; i < 10;i++) bt.print(nfc_id.nfcid[i],HEX);
       bt.println(); 
     }
@@ -435,12 +438,19 @@ void save_nfc_id() {
   else {
 
     lcd.clear();
-    lcd.print("Карта существует.");
+    lcd.setCursor(0,0); 
+    lcd.print(F("Карта существует."));
+    lcd.setCursor(0,1); 
+    lcd.print(F("Номер карты: ")); 
+    lcd.print(found_card);
     delay(2000);
+    
   } // Если это новая карточка
 
 
 }
+
+// ---------------------- Поиск Карточки --------------------------------
 
 boolean cmp_nfc_id() {
 
@@ -450,7 +460,9 @@ boolean cmp_nfc_id() {
 
   unsigned int address = 0;
 
-  for(int p=0;p<configuration.card_count;p++) {
+  int p;
+  
+  for(p=0;p<configuration.card_count;p++) {
 
     byte* pp = (byte*)(void*)&nfc_id_tmp;
 
@@ -474,7 +486,11 @@ boolean cmp_nfc_id() {
         break; 
       }
     }
-    if (ret_val) return true;
+    if (ret_val) { 
+     // found_card = p+1; 
+     // bt.println(p);
+     return(true); 
+    }
   }
 
   return(ret_val);
@@ -483,31 +499,19 @@ boolean cmp_nfc_id() {
 
 void showDate(const DateTime& dt) {
   bt.print(dt.day(), DEC);
-  bt.print('/');
+  bt.print(F("/"));
   bt.print(dt.month(), DEC);
-  bt.print('/');    
+  bt.print(F("/"));    
   bt.print(dt.year(), DEC);
-  bt.print(" ");
+  bt.print(F(" "));
   bt.print(dt.hour(), DEC);
-  bt.print(':');
+  bt.print(F(":"));
   bt.print(dt.minute(), DEC);
-  bt.print(':');
+  bt.print(F(":"));
   bt.print(dt.second(), DEC);
 }
 
 void menu(byte in) {
 
-  bt.println("1111"); 
-
-  if(in=='1') {
-    lcd.clear();
-  } 
 }
-
-
-
-
-
-
-
 
